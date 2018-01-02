@@ -12,6 +12,7 @@
  */
 package com.amazonaws.mobile.samples.mynotes;
 
+import android.content.AsyncQueryHandler;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.database.Cursor;
@@ -19,6 +20,7 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -44,6 +46,7 @@ public class NoteDetailFragment extends Fragment {
      * represents.
      */
     public static final String ARG_ITEM_ID = "noteId";
+    private static final int QUERY_TOKEN = 10;
 
     /**
      * The dummy content this fragment is presenting.
@@ -100,17 +103,24 @@ public class NoteDetailFragment extends Fragment {
         // Unbundle the arguments if any.  If there is an argument, load the data from
         // the content resolver aka the content provider.
         Bundle arguments = getArguments();
+        mItem = new Note();
         if (arguments != null && arguments.containsKey(ARG_ITEM_ID)) {
             String itemId = getArguments().getString(ARG_ITEM_ID);
             itemUri = NotesContentContract.Notes.uriBuilder(itemId);
-            Cursor data = contentResolver.query(itemUri, NotesContentContract.Notes.PROJECTION_ALL, null, null, null);
-            if (data != null) {
-                data.moveToFirst();
-                mItem = Note.fromCursor(data);
-                isUpdate = true;
-            }
+            AsyncQueryHandler queryHandler = new AsyncQueryHandler(contentResolver) {
+                @Override
+                protected void onQueryComplete(int token, Object cookie, Cursor cursor) {
+                    super.onQueryComplete(token, cookie, cursor);
+                    cursor.moveToFirst();
+                    mItem = Note.fromCursor(cursor);
+                    isUpdate = true;
+
+                    editTitle.setText(mItem.getTitle());
+                    editContent.setText(mItem.getContent());
+                }
+            };
+            queryHandler.startQuery(QUERY_TOKEN, null, itemUri, NotesContentContract.Notes.PROJECTION_ALL, null, null, null);
         } else {
-            mItem = new Note();
             isUpdate = false;
         }
 
@@ -149,10 +159,23 @@ public class NoteDetailFragment extends Fragment {
         // Convert to ContentValues and store in the database.
         if (isUpdated) {
             ContentValues values = mItem.toContentValues();
+            AsyncQueryHandler queryHandler = new AsyncQueryHandler(contentResolver) {
+                @Override
+                protected void onInsertComplete(int token, Object cookie, Uri uri) {
+                    super.onInsertComplete(token, cookie, uri);
+                    Log.d("NoteDetailFragment", "insert completed");
+                }
+
+                @Override
+                protected void onUpdateComplete(int token, Object cookie, int result) {
+                    super.onUpdateComplete(token, cookie, result);
+                    Log.d("NoteDetailFragment", "update completed");
+                }
+            };
             if (isUpdate) {
-                contentResolver.update(itemUri, values, null, null);
+                queryHandler.startUpdate(1, null, itemUri, values, null, null);
             } else {
-                itemUri = contentResolver.insert(NotesContentContract.Notes.CONTENT_URI, values);
+                queryHandler.startInsert(1, null, NotesContentContract.Notes.CONTENT_URI, values);
                 isUpdate = true;    // Anything from now on is an update
 
                 // Send Custom Event to Amazon Pinpoint
